@@ -167,3 +167,54 @@ resource "aws_vpc_security_group_ingress_rule" "db_inbound_from_app" {
   from_port                = 5432
   to_port                  = 5432
 }
+
+resource "aws_s3_bucket" "smartmed_bucket" {
+  bucket = "smartmed-assets"
+  tags = {
+    Name = "smartmed-assets"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "smartmed_versioning" {
+  bucket = aws_s3_bucket.smartmed_bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  } 
+}
+
+resource "aws_kms_key" "mykey" {
+  description             = "This key is used to encrypt bucket objects"
+  deletion_window_in_days = 10
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "smartmed_encryption" {
+  bucket = aws_s3_bucket.smartmed_bucket.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+      kms_master_key_id = aws_kms_key.mykey.arn
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "smartmed_public_access_block" {
+  bucket = aws_s3_bucket.smartmed_bucket.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "smartmed_lifecycle" {
+  bucket = aws_s3_bucket.smartmed_bucket.id
+
+  rule {
+    id = "glacier-transition"
+    status = "Enabled"
+
+    transition {
+      days          = 30
+      storage_class = "GLACIER"
+    }
+  }
+}
