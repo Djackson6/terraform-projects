@@ -273,6 +273,7 @@ resource "aws_s3_bucket_policy" "smartmed_bucket_policy" {
 resource "aws_cloudfront_distribution" "smartmed_distribution" {
   enabled = true
   is_ipv6_enabled = true
+  web_acl_id = aws_wafv2_web_acl.smartmed_waf.arn
 
   origin {
     domain_name = aws_s3_bucket.smartmed_bucket.bucket_regional_domain_name
@@ -316,5 +317,45 @@ resource "aws_cloudfront_distribution" "smartmed_distribution" {
     Name = "smartmed-distribution"
   }
 }
+
+# AWS WAFv2 Web ACL for CloudFront
+resource "aws_wafv2_web_acl" "smartmed_waf" {
+  name  = "smartmed-waf"
+  scope = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "smartmed-waf"
+    sampled_requests_enabled   = true
+  }
+
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "waf-managed-common"
+      sampled_requests_enabled   = true
+    }
+  }
+}
+
+
 
 
