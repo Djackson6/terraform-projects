@@ -356,6 +356,107 @@ resource "aws_wafv2_web_acl" "smartmed_waf" {
   }
 }
 
+# EC2 Launch Template for app servers
+resource "aws_launch_template" "smartmed_app_template" {
+  name   = "SmartMed"
+  image_id      = "ami-0c55b159cbfafe1f0"  # Amazon Linux 2 AMI (update to your region)
+  instance_type = "t2.micro"
 
+  network_interfaces {
+    associate_public_ip_address = false
+    security_groups             = [aws_security_group.app.id]
+    delete_on_termination       = true
+  }
 
+  monitoring {
+    enabled = true
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "smartmed-app-instance"
+    }
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Application Load Balancer
+resource "aws_lb" "smartmed_alb" {
+  name               = "smartmed-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = [aws_subnet.public_subnet_1.id, aws_subnet.public_subnet_2.id]
+
+  enable_deletion_protection = false
+
+  tags = {
+    Name = "smartmed-alb"
+  }
+}
+
+# Target Group
+resource "aws_lb_target_group" "smartmed_tg" {
+  name     = "smartmed-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.vpc.id
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    path                = "/"
+    matcher             = "200"
+  }
+
+  tags = {
+    Name = "smartmed-tg"
+  }
+}
+
+# ALB Listener
+resource "aws_lb_listener" "smartmed_listener" {
+  load_balancer_arn = aws_lb.smartmed_alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.smartmed_tg.arn
+  }
+}
+
+# Auto Scaling Group to launch and register EC2 instances
+resource "aws_autoscaling_group" "smartmed_asg" {
+  name                = "smartmed-asg"
+  vpc_zone_identifier = [aws_subnet.private_subnet_1.id, aws_subnet.private_subnet_2.id]
+  target_group_arns   = [aws_lb_target_group.smartmed_tg.arn]
+  health_check_type   = "ELB"
+  health_check_grace_period = 300
+
+  launch_template {
+    id      = aws_launch_template.smartmed_app_template.id
+    version = "$Latest"
+  }
+
+  min_size         = 2
+  max_size         = 4
+  desired_capacity = 2
+
+  tag {
+    key                 = "Name"
+    value               = "smartmed-asg-instance"
+    propagate_at_launch = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
 
