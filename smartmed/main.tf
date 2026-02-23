@@ -235,6 +235,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "smartmed_lifecycle" {
     id = "glacier-transition"
     status = "Enabled"
 
+    filter {}
+
     transition {
       days          = 30
       storage_class = "GLACIER"
@@ -242,12 +244,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "smartmed_lifecycle" {
   }
 }
 
-#CloudFront distribution for serving assets from S3 with OAI for secure access
+# S3 Static Website Configuration
+resource "aws_s3_bucket_website_configuration" "smartmed_website" {
+  bucket = aws_s3_bucket.smartmed_bucket.id
 
-# CloudFront Origin Access Identity for secure S3 access
-resource "aws_cloudfront_origin_access_identity" "smartmed_oai" {
-  comment = "OAI for smartmed S3 bucket"
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "error.html"
+  }
 }
+
+#CloudFront distribution for serving assets from S3 
 
 # S3 bucket policy to allow CloudFront access
 resource "aws_s3_bucket_policy" "smartmed_bucket_policy" {
@@ -260,28 +270,41 @@ resource "aws_s3_bucket_policy" "smartmed_bucket_policy" {
         Sid    = "CloudFrontAccess"
         Effect = "Allow"
         Principal = {
-          AWS = aws_cloudfront_origin_access_identity.smartmed_oai.iam_arn
+          "Service" = "cloudfront.amazonaws.com"
+        },
+        Action   = "s3:GetObject",
+        Resource = "${aws_s3_bucket.smartmed_bucket.arn}/*",
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.smartmed_distribution.arn
+          }
         }
-        Action   = "s3:GetObject"
-        Resource = "${aws_s3_bucket.smartmed_bucket.arn}/*"
       }
     ]
   })
 }
 
 # CloudFront distribution
+
+# Create an Origin Access Control (OAC) for CloudFront to securely access the S3 bucket
+resource "aws_cloudfront_origin_access_control" "default" {
+  name                              = "default-oac"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+# Create a CloudFront distribution to serve content from the S3 bucket with WAF protection
 resource "aws_cloudfront_distribution" "smartmed_distribution" {
   enabled = true
-  is_ipv6_enabled = true
+  is_ipv6_enabled = false
+  default_root_object = "index.html"
   web_acl_id = aws_wafv2_web_acl.smartmed_waf.arn
+  
 
   origin {
     domain_name = aws_s3_bucket.smartmed_bucket.bucket_regional_domain_name
     origin_id   = "smartmedS3Origin"
-
-    s3_origin_config {
-      origin_access_identity = aws_cloudfront_origin_access_identity.smartmed_oai.cloudfront_access_identity_path
-    }
+    origin_access_control_id = aws_cloudfront_origin_access_control.default.id
   }
 
   default_cache_behavior {
